@@ -22,6 +22,7 @@ on:
 
 env:
   NODE_VERSION: '22'
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
@@ -30,14 +31,27 @@ jobs:
   # Guard: só faz deploy se o CI passou
   # ────────────────────────────────────────────────────────────────────────────
   check-ci:
-    name: ✅ Verificar CI
+    name: ✅ Verificar CI & Secrets
     runs-on: ubuntu-latest
     if: |
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     steps:
       - name: CI status check
-        run: echo "✅ CI passou — iniciando deploy"
+        run: echo "✅ CI passou — verificando permissões de deploy"
+
+      - name: Verificar se VERCEL_TOKEN está configurado
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::warning title=Deploy desativado::A secret VERCEL_TOKEN não está configurada no GitHub Secrets. Os jobs de deploy foram ignorados."
+            echo "### ⚠️ Deploy ignorado: VERCEL_TOKEN não configurado" >> $GITHUB_STEP_SUMMARY
+            echo "Para ativar o deploy automático na Vercel, adicione em **Settings > Secrets and variables > Actions**:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`VERCEL_TOKEN\` (obtenha em https://vercel.com/account/tokens)" >> $GITHUB_STEP_SUMMARY
+            echo "- \`VERCEL_ORG_ID\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`VERCEL_PROJECT_ID\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ VERCEL_TOKEN detectado"
+          fi
 
   # ────────────────────────────────────────────────────────────────────────────
   # JOB: Deploy de Staging (branch develop ou PR)
@@ -47,8 +61,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [check-ci]
     if: |
-      github.ref == 'refs/heads/develop' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+      secrets.VERCEL_TOKEN != '' &&
+      (github.ref == 'refs/heads/develop' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'))
     environment:
       name: staging
       url: ${{ steps.deploy.outputs.preview-url }}
@@ -73,7 +88,7 @@ jobs:
         id: deploy
         run: |
           DEPLOY_URL=$(vercel deploy \
-            --token=${{ secrets.VERCEL_TOKEN }} \
+            --token="$VERCEL_TOKEN" \
             --env VITE_SUPABASE_URL=${{ secrets.STAGING_VITE_SUPABASE_URL }} \
             --env VITE_SUPABASE_ANON_KEY=${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }} \
             --env VITE_CLOUDINARY_CLOUD_NAME=${{ secrets.VITE_CLOUDINARY_CLOUD_NAME }} \
@@ -105,8 +120,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [check-ci]
     if: |
-      github.ref == 'refs/heads/main' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+      secrets.VERCEL_TOKEN != '' &&
+      (github.ref == 'refs/heads/main' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'))
     environment:
       name: production
       url: https://fenix-expedicao.vercel.app
@@ -128,10 +144,10 @@ jobs:
         run: npm install -g vercel@latest
 
       - name: 🔗 Pull da configuração do Vercel
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: 🏗️ Build para produção
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel build --prod --token="$VERCEL_TOKEN"
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
@@ -164,7 +180,7 @@ jobs:
           echo "✅ Bundle limpo — deploy autorizado"
 
       - name: 🚀 Deploy para Produção
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
 
       - name: 🏷️ Criar tag de release
         uses: actions/github-script@v7
