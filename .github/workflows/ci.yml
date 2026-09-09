@@ -194,11 +194,11 @@ jobs:
 
           BUNDLE_DIR="dist"
 
-          # Lista de strings que NUNCA devem aparecer no bundle de produção
+          # Lista de secrets privados que NUNCA devem aparecer no bundle de produção
+          # (Chaves públicas/anon do Supabase são esperadas no bundle frontend)
           FORBIDDEN_STRINGS=(
             "d2IpM2sUVUBoHDihCtrzdhW2aCs"
             "CLOUDINARY_API_SECRET"
-            "sb_publishable_T4cZRqR95AOIIFj7c"
           )
 
           FOUND_SECRETS=false
