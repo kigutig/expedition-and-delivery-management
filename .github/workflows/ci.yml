@@ -12,6 +12,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   NODE_VERSION: '22'
 
@@ -78,6 +81,8 @@ jobs:
     name: 🎨 Lint & TypeCheck
     runs-on: ubuntu-latest
     needs: [security-scan]
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout do código
@@ -105,6 +110,9 @@ jobs:
     name: 🧪 Testes Automatizados
     runs-on: ubuntu-latest
     needs: [lint-and-typecheck]
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout do código
@@ -164,6 +172,8 @@ jobs:
     name: 🏗️ Build de Produção
     runs-on: ubuntu-latest
     needs: [tests]
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout do código
@@ -242,6 +252,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [security-scan, tests, build]
     if: always()
+    permissions:
+      contents: read
 
     steps:
       - name: Sumário de Segurança

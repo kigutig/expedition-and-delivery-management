@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     if (error) {
       console.error("Failed to update status in cronograma database:", error);
       return new Response(
-        JSON.stringify({ error: `Database update error: ${error.message}` }),
+        JSON.stringify({ error: "Failed to update status in cronograma database" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
   } catch (error: any) {
     console.error("Unexpected error in Edge Function:", error);
     return new Response(
-      JSON.stringify({ error: error.message || String(error) }),
+      JSON.stringify({ error: "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

@@ -20,6 +20,9 @@ on:
           - staging
           - production
 
+permissions:
+  contents: read
+
 env:
   NODE_VERSION: '22'
   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -33,6 +36,8 @@ jobs:
   check-ci:
     name: ✅ Verificar CI & Secrets
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: |
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
@@ -60,6 +65,9 @@ jobs:
     name: 🟡 Deploy → Staging
     runs-on: ubuntu-latest
     needs: [check-ci]
+    permissions:
+      contents: read
+      pull-requests: write
     if: |
       secrets.VERCEL_TOKEN != '' &&
       (github.ref == 'refs/heads/develop' ||
@@ -119,6 +127,8 @@ jobs:
     name: 🟢 Deploy → Produção
     runs-on: ubuntu-latest
     needs: [check-ci]
+    permissions:
+      contents: write
     if: |
       secrets.VERCEL_TOKEN != '' &&
       (github.ref == 'refs/heads/main' ||
