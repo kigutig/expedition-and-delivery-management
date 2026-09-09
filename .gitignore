@@ -43,3 +43,6 @@ log/
 *.rar
 *.7z
 *.bak
+
+.vercel
+.env*
