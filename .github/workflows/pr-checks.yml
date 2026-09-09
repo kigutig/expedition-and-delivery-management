@@ -1,0 +1,71 @@
+name: 🔔 PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Check rápido de secrets no PR (não escaneia histórico completo)
+  # ────────────────────────────────────────────────────────────────────────────
+  pr-secret-scan:
+    name: 🕵️ Secrets no PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: TruffleHog — Scan do diff do PR
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --only-verified
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Checklist de qualidade rápida
+  # ────────────────────────────────────────────────────────────────────────────
+  pr-quality:
+    name: ✅ Qualidade do PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: TypeScript Check
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Testes de Segurança
+        run: npm run test:security
+        env:
+          VITE_SUPABASE_URL: https://test.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-key
+          VITE_CLOUDINARY_CLOUD_NAME: test-cloud
+          VITE_CLOUDINARY_API_KEY: test-api-key
+
+      - name: Todos os Testes
+        run: npm run test
+        env:
+          VITE_SUPABASE_URL: https://test.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-key
+          VITE_CLOUDINARY_CLOUD_NAME: test-cloud
+          VITE_CLOUDINARY_API_KEY: test-api-key

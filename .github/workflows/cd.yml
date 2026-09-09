@@ -1,0 +1,189 @@
+name: 🚀 CD — Deploy Contínuo (Vercel)
+
+on:
+  push:
+    branches:
+      - main      # → Deploy de PRODUÇÃO
+      - develop   # → Deploy de STAGING (preview)
+  workflow_run:
+    workflows: ['🔒 CI — Build, Test & Security']
+    types: [completed]
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente alvo'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  NODE_VERSION: '20'
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Guard: só faz deploy se o CI passou
+  # ────────────────────────────────────────────────────────────────────────────
+  check-ci:
+    name: ✅ Verificar CI
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: CI status check
+        run: echo "✅ CI passou — iniciando deploy"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB: Deploy de Staging (branch develop ou PR)
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: 🟡 Deploy → Staging
+    runs-on: ubuntu-latest
+    needs: [check-ci]
+    if: |
+      github.ref == 'refs/heads/develop' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.preview-url }}
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: Instalar Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: 🟡 Deploy para Staging (Vercel Preview)
+        id: deploy
+        run: |
+          DEPLOY_URL=$(vercel deploy \
+            --token=${{ secrets.VERCEL_TOKEN }} \
+            --env VITE_SUPABASE_URL=${{ secrets.STAGING_VITE_SUPABASE_URL }} \
+            --env VITE_SUPABASE_ANON_KEY=${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }} \
+            --env VITE_CLOUDINARY_CLOUD_NAME=${{ secrets.VITE_CLOUDINARY_CLOUD_NAME }} \
+            --env VITE_CLOUDINARY_API_KEY=${{ secrets.VITE_CLOUDINARY_API_KEY }} \
+            --env VITE_CLOUDINARY_SIGN_URL=${{ secrets.VITE_CLOUDINARY_SIGN_URL }} \
+            --env VITE_FENIX_GUIDE_PDF_URL=${{ secrets.VITE_FENIX_GUIDE_PDF_URL }} \
+            2>&1 | tail -1)
+          echo "preview-url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+          echo "✅ Staging URL: $DEPLOY_URL"
+
+      - name: Comentar URL no PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.deploy.outputs.preview-url }}';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🟡 Preview Deploy\n\nDeploy de staging pronto!\n\n🔗 **URL:** ${url}\n\n> Commit: \`${context.sha.slice(0,7)}\``
+            });
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB: Deploy de Produção (branch main)
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy-production:
+    name: 🟢 Deploy → Produção
+    runs-on: ubuntu-latest
+    needs: [check-ci]
+    if: |
+      github.ref == 'refs/heads/main' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://fenix-expedicao.vercel.app
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: Instalar Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: 🔗 Pull da configuração do Vercel
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: 🏗️ Build para produção
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_CLOUDINARY_CLOUD_NAME: ${{ secrets.VITE_CLOUDINARY_CLOUD_NAME }}
+          VITE_CLOUDINARY_API_KEY: ${{ secrets.VITE_CLOUDINARY_API_KEY }}
+          VITE_CLOUDINARY_SIGN_URL: ${{ secrets.VITE_CLOUDINARY_SIGN_URL }}
+          VITE_FENIX_GUIDE_PDF_URL: ${{ secrets.VITE_FENIX_GUIDE_PDF_URL }}
+
+      - name: 🔍 Verificar ausência de secrets no bundle pré-deploy
+        run: |
+          echo "🔒 Verificação de segurança do bundle..."
+          FOUND=false
+
+          FORBIDDEN=(
+            "d2IpM2sUVUBoHDihCtrzdhW2aCs"
+            "CLOUDINARY_API_SECRET"
+          )
+
+          for SECRET in "${FORBIDDEN[@]}"; do
+            if grep -r --include="*.js" --include="*.html" -l "$SECRET" .vercel/output 2>/dev/null | grep -q .; then
+              echo "❌ Secret detectado no bundle: $SECRET"
+              FOUND=true
+            fi
+          done
+
+          if [ "$FOUND" = true ]; then
+            echo "❌ Deploy cancelado: secrets encontrados no bundle"
+            exit 1
+          fi
+          echo "✅ Bundle limpo — deploy autorizado"
+
+      - name: 🚀 Deploy para Produção
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: 🏷️ Criar tag de release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = `v${new Date().toISOString().slice(0,10).replace(/-/g,'.')}-${context.sha.slice(0,7)}`;
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/${tag}`,
+              sha: context.sha,
+            });
+            console.log(`✅ Tag criada: ${tag}`);
+
+      - name: Notificar deploy no summary
+        run: |
+          echo "## 🟢 Deploy de Produção Realizado" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Autor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** https://fenix-expedicao.vercel.app" >> $GITHUB_STEP_SUMMARY

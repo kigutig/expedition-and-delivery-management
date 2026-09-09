@@ -1,0 +1,27 @@
+# CODEOWNERS
+# Revisores obrigatórios para arquivos críticos de segurança.
+# PRs que modificam esses arquivos exigem aprovação dos owners listados.
+
+# ─── Arquivos de configuração de segurança ────────────────────────────────────
+.env.example                            @kigutifenix-crypto
+.gitignore                              @kigutifenix-crypto
+index.html                              @kigutifenix-crypto
+
+# ─── Código do cliente que lida com autenticação e credenciais ────────────────
+src/lib/supabase.ts                     @kigutifenix-crypto
+src/lib/cloudinary.ts                   @kigutifenix-crypto
+src/components/AdminRoute.tsx           @kigutifenix-crypto
+src/App.tsx                             @kigutifenix-crypto
+
+# ─── Edge Functions (código servidor) ────────────────────────────────────────
+supabase/functions/                     @kigutifenix-crypto
+
+# ─── Pipeline CI/CD e configurações de segurança ─────────────────────────────
+.github/                                @kigutifenix-crypto
+.eslintrc.json                          @kigutifenix-crypto
+vitest.config.ts                        @kigutifenix-crypto
+src/tests/                              @kigutifenix-crypto
+
+# ─── Schemas do banco de dados ───────────────────────────────────────────────
+supabase/schema.sql                     @kigutifenix-crypto
+migration.sql                           @kigutifenix-crypto

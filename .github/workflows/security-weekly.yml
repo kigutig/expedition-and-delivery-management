@@ -1,0 +1,211 @@
+name: 🛡️ Scan Semanal de Segurança
+
+on:
+  schedule:
+    # Toda segunda-feira às 08:00 UTC (05:00 Brasília)
+    - cron: '0 8 * * 1'
+  workflow_dispatch: # Permite execução manual
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Auditoria completa de dependências
+  # ────────────────────────────────────────────────────────────────────────────
+  dependency-audit:
+    name: 📦 Auditoria de Dependências
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: npm audit — Relatório completo
+        run: npm audit --json > audit-report.json 2>&1 || true
+
+      - name: Analisar resultado do audit
+        run: |
+          CRITICAL=$(cat audit-report.json | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('metadata', {}).get('vulnerabilities', {}).get('critical', 0))" 2>/dev/null || echo "0")
+          HIGH=$(cat audit-report.json | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('metadata', {}).get('vulnerabilities', {}).get('high', 0))" 2>/dev/null || echo "0")
+          MODERATE=$(cat audit-report.json | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('metadata', {}).get('vulnerabilities', {}).get('moderate', 0))" 2>/dev/null || echo "0")
+
+          echo "## 📦 Relatório de Auditoria de Dependências" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Severidade | Quantidade |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔴 Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟠 High | $HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟡 Moderate | $MODERATE |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$CRITICAL" -gt "0" ] || [ "$HIGH" -gt "0" ]; then
+            echo "⚠️ Vulnerabilidades críticas/altas encontradas — abrindo issue"
+            echo "SHOULD_CREATE_ISSUE=true" >> $GITHUB_ENV
+          fi
+
+      - name: Upload do relatório de auditoria
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-${{ github.run_id }}
+          path: audit-report.json
+          retention-days: 90
+
+      - name: Criar issue se encontradas vulnerabilidades críticas
+        if: env.SHOULD_CREATE_ISSUE == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🔴 Vulnerabilidades de segurança detectadas — ${new Date().toLocaleDateString('pt-BR')}`;
+            const body = `## Scan Automático de Segurança\n\nForam detectadas vulnerabilidades críticas ou altas nas dependências do projeto.\n\n**Ação necessária:** Execute \`npm audit\` localmente e atualize as dependências afetadas.\n\n\`\`\`bash\nnpm audit\nnpm audit fix\n\`\`\`\n\nVeja o relatório completo no [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}).`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['security', 'dependencies'],
+            });
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Scan completo de secrets no histórico Git
+  # ────────────────────────────────────────────────────────────────────────────
+  secret-scan:
+    name: 🕵️ Scan de Secrets (TruffleHog)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Escanear TODO o histórico Git
+
+      - name: TruffleHog — Scan completo do repositório
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified --json
+        continue-on-error: true
+        id: trufflehog
+
+      - name: Reportar resultado do TruffleHog
+        run: |
+          echo "## 🕵️ TruffleHog — Scan de Secrets" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.trufflehog.outcome }}" == "failure" ]; then
+            echo "❌ **Secrets verificados detectados no repositório!**" >> $GITHUB_STEP_SUMMARY
+            echo "Revise o histórico Git e faça revogação imediata das credenciais expostas." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Nenhum secret verificado detectado." >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 3: SAST com Semgrep
+  # ────────────────────────────────────────────────────────────────────────────
+  sast-scan:
+    name: 🔬 SAST (Semgrep)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Semgrep — Análise estática de segurança
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/javascript
+            p/typescript
+            p/react
+            p/secrets
+            p/owasp-top-ten
+            p/xss
+            p/injection
+          generateSarif: '1'
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true
+
+      - name: Upload resultados SARIF para GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+        continue-on-error: true
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 4: Verificação de licenças das dependências
+  # ────────────────────────────────────────────────────────────────────────────
+  license-check:
+    name: 📜 Verificação de Licenças
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: Verificar licenças das dependências
+        run: |
+          npx --yes license-checker --onlyAllow \
+            "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;Unlicense;Python-2.0;BlueOak-1.0.0" \
+            --excludePrivatePackages \
+            --json > licenses.json 2>&1 || true
+
+          echo "## 📜 Licenças das Dependências" >> $GITHUB_STEP_SUMMARY
+          TOTAL=$(cat licenses.json | python3 -c "import sys, json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "N/A")
+          echo "Total de pacotes verificados: **$TOTAL**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload relatório de licenças
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report-${{ github.run_id }}
+          path: licenses.json
+          retention-days: 90
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 5: Testes de segurança DevSecOps
+  # ────────────────────────────────────────────────────────────────────────────
+  devsecops-tests:
+    name: 🧪 Testes DevSecOps
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: 🔒 Executar testes de segurança
+        run: npm run test:security
+        env:
+          VITE_SUPABASE_URL: https://test.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-key
+          VITE_CLOUDINARY_CLOUD_NAME: test-cloud
+          VITE_CLOUDINARY_API_KEY: test-api-key

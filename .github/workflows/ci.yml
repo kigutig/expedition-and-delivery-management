@@ -1,0 +1,257 @@
+name: 🔒 CI — Build, Test & Security
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Garante que apenas um workflow rode por branch ao mesmo tempo
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Auditoria de Dependências + Scan de Secrets
+  # ────────────────────────────────────────────────────────────────────────────
+  security-scan:
+    name: 🔍 Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Necessário para o TruffleHog escanear todo o histórico
+
+      # ── Detecta secrets vazados no histórico Git ─────────────────────────
+      - name: 🕵️ TruffleHog — Scan de secrets no histórico Git
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+      # ── Auditoria de vulnerabilidades nas dependências ───────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: 🔎 npm audit — Vulnerabilidades nas dependências
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
+      # ── SAST com Semgrep ─────────────────────────────────────────────────
+      - name: 🛡️ Semgrep SAST — Análise estática de segurança
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/javascript
+            p/typescript
+            p/react
+            p/secrets
+            p/owasp-top-ten
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true # Não bloqueia o pipeline, mas reporta
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Lint e TypeCheck
+  # ────────────────────────────────────────────────────────────────────────────
+  lint-and-typecheck:
+    name: 🎨 Lint & TypeCheck
+    runs-on: ubuntu-latest
+    needs: [security-scan]
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: 🎨 ESLint — Análise de qualidade e segurança do código
+        run: npm run lint
+
+      - name: 📐 TypeScript — Verificação de tipos
+        run: npm run typecheck
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 3: Testes Automatizados
+  # ────────────────────────────────────────────────────────────────────────────
+  tests:
+    name: 🧪 Testes Automatizados
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck]
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: 🧪 Vitest — Testes unitários
+        run: npm run test:unit
+        env:
+          # Variáveis de ambiente para os testes (valores de teste, não reais)
+          VITE_SUPABASE_URL: https://test-project.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-anon-key-for-ci
+          VITE_CLOUDINARY_CLOUD_NAME: test-cloud
+          VITE_CLOUDINARY_API_KEY: test-api-key
+
+      - name: 🔗 Vitest — Testes de integração
+        run: npm run test:integration
+        env:
+          VITE_SUPABASE_URL: https://test-project.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-anon-key-for-ci
+          VITE_CLOUDINARY_CLOUD_NAME: test-cloud
+          VITE_CLOUDINARY_API_KEY: test-api-key
+
+      - name: 📊 Cobertura de código
+        run: npm run test:coverage
+        env:
+          VITE_SUPABASE_URL: https://test-project.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-anon-key-for-ci
+          VITE_CLOUDINARY_CLOUD_NAME: test-cloud
+          VITE_CLOUDINARY_API_KEY: test-api-key
+
+      - name: Upload do relatório de cobertura
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Publicar cobertura no PR
+        uses: davelosert/vitest-coverage-report-action@v2
+        if: github.event_name == 'pull_request'
+        with:
+          json-summary-path: coverage/coverage-summary.json
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 4: Build de Produção
+  # ────────────────────────────────────────────────────────────────────────────
+  build:
+    name: 🏗️ Build de Produção
+    runs-on: ubuntu-latest
+    needs: [tests]
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: 🏗️ Vite Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_CLOUDINARY_CLOUD_NAME: ${{ secrets.VITE_CLOUDINARY_CLOUD_NAME }}
+          VITE_CLOUDINARY_API_KEY: ${{ secrets.VITE_CLOUDINARY_API_KEY }}
+          VITE_CLOUDINARY_SIGN_URL: ${{ secrets.VITE_CLOUDINARY_SIGN_URL }}
+          VITE_FENIX_GUIDE_PDF_URL: ${{ secrets.VITE_FENIX_GUIDE_PDF_URL }}
+
+      - name: 🔍 Verificar ausência de secrets no bundle
+        run: |
+          echo "Verificando se o bundle não contém credenciais hardcoded..."
+
+          BUNDLE_DIR="dist"
+
+          # Lista de strings que NUNCA devem aparecer no bundle de produção
+          FORBIDDEN_STRINGS=(
+            "d2IpM2sUVUBoHDihCtrzdhW2aCs"
+            "CLOUDINARY_API_SECRET"
+            "sb_publishable_T4cZRqR95AOIIFj7c"
+          )
+
+          FOUND_SECRETS=false
+
+          for SECRET in "${FORBIDDEN_STRINGS[@]}"; do
+            if grep -r --include="*.js" --include="*.html" -l "$SECRET" "$BUNDLE_DIR" 2>/dev/null | grep -q .; then
+              echo "❌ CRÍTICO: Secret detectado no bundle: $SECRET"
+              FOUND_SECRETS=true
+            fi
+          done
+
+          if [ "$FOUND_SECRETS" = true ]; then
+            echo "❌ Build rejeitado: secrets encontrados no bundle de produção"
+            exit 1
+          else
+            echo "✅ Bundle limpo — nenhum secret detectado"
+          fi
+
+      - name: Upload do artefato de build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+
+      - name: 📦 Gerar SBOM (Software Bill of Materials)
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom.json --output-format JSON
+
+      - name: Upload do SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.json
+          retention-days: 90
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 5: Relatório final de segurança
+  # ────────────────────────────────────────────────────────────────────────────
+  security-report:
+    name: 📋 Relatório de Segurança
+    runs-on: ubuntu-latest
+    needs: [security-scan, tests, build]
+    if: always()
+
+    steps:
+      - name: Sumário de Segurança
+        run: |
+          echo "## 🔒 Relatório de Segurança CI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| TruffleHog (Secrets scan) | ${{ needs.security-scan.result == 'success' && '✅ Passou' || '❌ Falhou' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| npm audit (Dependências) | ${{ needs.security-scan.result == 'success' && '✅ Passou' || '❌ Falhou' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Testes automatizados | ${{ needs.tests.result == 'success' && '✅ Passou' || '❌ Falhou' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build + Bundle scan | ${{ needs.build.result == 'success' && '✅ Passou' || '❌ Falhou' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
