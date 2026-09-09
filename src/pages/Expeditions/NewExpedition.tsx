@@ -169,7 +169,7 @@ export const NewExpedition = () => {
       setLoadError('');
 
       const { data, error } = await supabase
-        .from<Expedition>('expeditions')
+        .from('expeditions')
         .select('*')
         .eq('id', id)
         .single();
@@ -1050,7 +1050,7 @@ const normalizeStatus = (inputStatus: string) => {
                 }}
                 type="file"
                 accept={currentUploadType === 'photo' ? 'image/*' : 'video/*'}
-                capture={currentUploadType === 'photo' ? 'environment' : 'camcorder'}
+                capture={currentUploadType === 'photo' ? 'environment' : ('camcorder' as any)}
                 multiple={currentUploadType === 'photo'}
                 className="hidden"
                 onChange={handleFileUpload}

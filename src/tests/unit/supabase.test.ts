@@ -5,7 +5,10 @@
  * Verifica comportamento do cliente e validação de configuração.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
+vi.unmock('../lib/supabase');
+vi.unmock('../../lib/supabase');
 
 describe('[Unit] supabase.ts — validação de variáveis de ambiente', () => {
   const originalEnv = { ...import.meta.env };
@@ -30,7 +33,7 @@ describe('[Unit] supabase.ts — validação de variáveis de ambiente', () => {
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'test-anon-key');
 
     await expect(import('../../lib/supabase')).rejects.toThrow(
-      /Variáveis de ambiente obrigatórias/i
+      /Vari[aá]veis de ambiente obrigat[oó]rias/i
     );
   });
 
@@ -39,7 +42,7 @@ describe('[Unit] supabase.ts — validação de variáveis de ambiente', () => {
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
 
     await expect(import('../../lib/supabase')).rejects.toThrow(
-      /Variáveis de ambiente obrigatórias/i
+      /Vari[aá]veis de ambiente obrigat[oó]rias/i
     );
   });
 });

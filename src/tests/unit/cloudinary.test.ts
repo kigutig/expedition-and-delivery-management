@@ -57,7 +57,7 @@ describe('[Unit] cloudinary.ts — segurança: assinatura server-side', () => {
       open: vi.fn(),
       send: vi.fn(),
       upload: { addEventListener: vi.fn() },
-      addEventListener: vi.fn().mockImplementation((event: string, cb: Function) => {
+      addEventListener: vi.fn().mockImplementation((event: string, cb: () => void) => {
         if (event === 'load') {
           // Simula resposta bem-sucedida
           setTimeout(() => {
@@ -77,7 +77,9 @@ describe('[Unit] cloudinary.ts — segurança: assinatura server-side', () => {
         }
       }),
     };
-    global.XMLHttpRequest = vi.fn(() => xhrMock) as any;
+    global.XMLHttpRequest = vi.fn(function () {
+      return xhrMock;
+    }) as any;
 
     const { uploadImageToCloudinary } = await import('../../lib/cloudinary');
     const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' });

@@ -2,7 +2,7 @@
 // Setup global para todos os testes Vitest
 
 import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import { vi, beforeAll, afterAll } from 'vitest';
 
 // ─── Mock global do Supabase ─────────────────────────────────────────────────
 // Evita chamadas reais de rede durante os testes
@@ -29,6 +29,7 @@ vi.mock('../lib/supabase', () => ({
     }),
   },
   storageBucket: 'delivery-photos',
+  uploadDeliveryPhoto: vi.fn(),
 }));
 
 // ─── Mock do window.matchMedia ────────────────────────────────────────────────

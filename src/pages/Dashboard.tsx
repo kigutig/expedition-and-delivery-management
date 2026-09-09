@@ -83,7 +83,7 @@ export const Dashboard = () => {
             .select('id,client_name,order_number,nf_number,status,date')
             .order('date', { ascending: false })
             .limit(6),
-          supabase.from<{ rating: number }>('feedbacks').select('rating'),
+          supabase.from('feedbacks').select('rating'),
           supabase.from('vw_warranties').select('id,status'),
         ]);
 

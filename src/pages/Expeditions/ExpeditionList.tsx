@@ -97,7 +97,7 @@ export const ExpeditionList = () => {
     setError('');
     try {
       const { data, error } = await supabase
-        .from<Expedition>('expeditions')
+        .from('expeditions')
         .select('id,date,nf_number,order_number,client_name,status,carrier,freight_type')
         .order('created_at', { ascending: false });
 

@@ -34,9 +34,9 @@ export const CustomerDetail = () => {
 
     const load = async () => {
       setLoading(true);
-      const { data: customerData } = await supabase.from<Customer>('customers').select('*').eq('id', id).single();
+      const { data: customerData } = await supabase.from('customers').select('*').eq('id', id).single();
       const { data: deliveries } = await supabase
-        .from<Delivery>('deliveries')
+        .from('deliveries')
         .select('id, order_number, nf_number, status, created_at')
         .eq('customer_id', id)
         .order('created_at', { ascending: false });

@@ -80,17 +80,17 @@ export const Reports = () => {
       try {
         const [deliveriesResult, warrantiesResult, expeditionsResult] = await Promise.all([
           supabase
-            .from<DeliveryReportItem>('vw_deliveries')
+            .from('vw_deliveries')
             .select('id,expedition_id,order_number,nf_number,customer_name,status,created_at,finished_at,driver_name,expedition_client_name')
             .order('created_at', { ascending: false })
             .limit(500),
           supabase
-            .from<WarrantyReportItem>('vw_warranties')
+            .from('vw_warranties')
             .select('id,customer_name,expedition_client_name,order_number,nf_number,start_date,end_date,status')
             .order('end_date', { ascending: true })
             .limit(500),
           supabase
-            .from<ExpeditionData>('expeditions')
+            .from('expeditions')
             .select('id,carrier,status,created_at,responsible,order_number,nf_number,client_name')
             .order('created_at', { ascending: false })
             .limit(500),
@@ -252,7 +252,7 @@ export const Reports = () => {
     });
   }, [filteredDeliveries, filteredExpeditions, expeditions]);
 
-  const downloadCsvFile = (filename: string, headers: string[], rows: string[][]) => {
+  const downloadCsvFile = (filename: string, headers: string[], rows: (string | number)[][]) => {
     const csv = [headers.join(','), ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a');

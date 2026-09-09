@@ -26,7 +26,7 @@ export const CustomerList = () => {
   const loadCustomers = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from<Customer>('customers')
+      .from('customers')
       .select('*')
       .order('created_at', { ascending: false });
 

@@ -71,7 +71,7 @@ export const DeliveryList = () => {
     setError('');
 
     const { data, error: fetchError } = await supabase
-      .from<DeliverySummary>('vw_deliveries')
+      .from('vw_deliveries')
       .select('id, order_number, nf_number, status, customer_id, customer_name, created_at')
       .order('created_at', { ascending: false });
 

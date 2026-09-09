@@ -79,7 +79,7 @@ export const ExpeditionDetail = () => {
     const loadExpedition = async () => {
       setLoading(true);
       const { data, error } = await supabase
-        .from<Expedition>('expeditions')
+        .from('expeditions')
         .select('*')
         .eq('id', id)
         .single();
@@ -93,7 +93,7 @@ export const ExpeditionDetail = () => {
 
         if (data?.id) {
           const { data: photoData, error: photoError } = await supabase
-            .from<ExpeditionPhoto>('expedition_photos')
+            .from('expedition_photos')
             .select('id, photo_type, public_url, captured_at')
             .eq('expedition_id', data.id)
             .order('captured_at', { ascending: true });
@@ -106,7 +106,7 @@ export const ExpeditionDetail = () => {
           }
 
           const { data: deliveryData, error: deliveryError } = await supabase
-            .from<ExpeditionDeliverySignature>('deliveries')
+            .from('deliveries')
             .select('signer_name, signer_document, signer_role, signed_at, signature_data')
             .eq('expedition_id', data.id)
             .order('created_at', { ascending: false })

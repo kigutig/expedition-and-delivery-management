@@ -23,11 +23,7 @@ export async function uploadDeliveryPhoto(
   options: UploadOptions = {}
 ) {
   const folder = `deliveries/${deliveryId}`;
-  try {
-    const result = await uploadImageToCloudinary(file, folder, options);
-    const path = `${folder}/${result.public_id}`;
-    return { path, publicUrl: result.secure_url };
-  } catch (error) {
-    throw error;
-  }
+  const result = await uploadImageToCloudinary(file, folder, options);
+  const path = `${folder}/${result.public_id}`;
+  return { path, publicUrl: result.secure_url };
 }

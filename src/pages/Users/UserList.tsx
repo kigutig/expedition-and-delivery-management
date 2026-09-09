@@ -114,8 +114,8 @@ export const UserList = () => {
           setMessageDialog({ open: true, title: 'Erro', message: 'Erro ao verificar/criar registro local para o e-mail existente.' });
         } finally {
           setSavingUser(false);
-          return;
         }
+        return;
       }
 
       console.error('Erro ao criar conta de autenticação:', authError.message);
@@ -135,7 +135,7 @@ export const UserList = () => {
     };
 
     const { data, error } = await supabase
-      .from<UserItem>('users')
+      .from('users')
       .insert([payload])
       .select('*');
 
@@ -188,7 +188,7 @@ export const UserList = () => {
     };
 
     const { data, error } = await supabase
-      .from<UserItem>('users')
+      .from('users')
       .update(payload)
       .eq('id', editForm.id)
       .select('*');

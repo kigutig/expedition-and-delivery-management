@@ -102,7 +102,7 @@ export const DeliveryDetail = ({ mode = 'view' }: DeliveryDetailProps) => {
     const load = async () => {
       setLoading(true);
       const { data: deliveryData, error } = await supabase
-        .from<Delivery>('deliveries')
+        .from('deliveries')
         .select('*')
         .eq('id', id)
         .maybeSingle();
@@ -148,7 +148,7 @@ export const DeliveryDetail = ({ mode = 'view' }: DeliveryDetailProps) => {
       }
 
       const { data: photoData } = await supabase
-        .from<Photo>('delivery_photos')
+        .from('delivery_photos')
         .select('*')
         .eq('delivery_id', id)
         .neq('photo_type', 'video')

@@ -41,7 +41,7 @@ export const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
-  const debounceTimerRef = useRef<NodeJS.Timeout>();
+  const debounceTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const fetchSuggestions = async (query: string) => {
     if (query.length < 3) {
