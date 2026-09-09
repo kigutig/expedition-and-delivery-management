@@ -15,17 +15,14 @@
         font-src 'self' https://fonts.gstatic.com;
         img-src 'self' data: blob: https://res.cloudinary.com https://*.supabase.co;
         connect-src 'self' https://*.supabase.co https://api.cloudinary.com wss://*.supabase.co;
-        frame-ancestors 'none';
         base-uri 'self';
         form-action 'self';
       "
     />
-    <!-- Impede que o app seja embutido em iframes (proteção contra clickjacking) -->
-    <meta http-equiv="X-Frame-Options" content="DENY" />
+    <!-- Proteção contra clickjacking: X-Frame-Options DENY configurado via HTTP Header no vercel.json -->
     <!-- Limita dados enviados no Referer para evitar vazamento de informações -->
     <meta name="referrer" content="strict-origin-when-cross-origin" />
-    <!-- Impede que o browser "sniffe" o tipo MIME dos arquivos -->
-    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <!-- Impede que o browser 'sniffe' o tipo MIME dos arquivos: X-Content-Type-Options nosniff no vercel.json -->
 
     <title>Fenix — Gestão de Expedição e Entregas</title>
     <meta
