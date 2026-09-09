@@ -10,6 +10,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 vi.unmock('../lib/supabase');
 vi.unmock('../../lib/supabase');
 
+vi.mock('../../lib/cloudinary', () => ({
+  uploadImageToCloudinary: vi.fn().mockResolvedValue({
+    public_id: 'sample-public-id',
+    secure_url: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+  }),
+}));
+
 describe('[Unit] supabase.ts — validação de variáveis de ambiente', () => {
   const originalEnv = { ...import.meta.env };
 
@@ -61,5 +68,14 @@ describe('[Unit] supabase.ts — exportações corretas', () => {
   it('deve exportar uploadDeliveryPhoto como função', async () => {
     const mod = await import('../../lib/supabase');
     expect(typeof mod.uploadDeliveryPhoto).toBe('function');
+  });
+
+  it('uploadDeliveryPhoto deve chamar uploadImageToCloudinary e retornar path e publicUrl', async () => {
+    const mod = await import('../../lib/supabase');
+    const fakeFile = new File(['test'], 'photo.jpg', { type: 'image/jpeg' });
+    const result = await mod.uploadDeliveryPhoto('deliv-123', fakeFile, 'canhoto');
+
+    expect(result.path).toBe('deliveries/deliv-123/sample-public-id');
+    expect(result.publicUrl).toBe('https://res.cloudinary.com/demo/image/upload/sample.jpg');
   });
 });
