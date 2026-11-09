@@ -88,6 +88,7 @@ export const DeliveryDetail = ({ mode = 'view' }: DeliveryDetailProps) => {
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [modalError, setModalError] = useState('');
   const [pendingStatus, setPendingStatus] = useState<'entregue' | 'finalizado' | null>(null);
   const [feedbackDeliveryRating, setFeedbackDeliveryRating] = useState(5);
   const [feedbackInstallationRating, setFeedbackInstallationRating] = useState(5);
@@ -466,218 +467,243 @@ export const DeliveryDetail = ({ mode = 'view' }: DeliveryDetailProps) => {
     setMessage('Assinatura registrada com sucesso.');
   };
 
-  const openFeedbackModal = (status: 'entregue' | 'finalizado') => {
+  const openFeedbackModal = (status: 'entregue' | 'finalizado' = 'finalizado') => {
     setPendingStatus(status);
     setShowFeedbackModal(true);
+    setModalError('');
     setMessage('');
   };
 
   const submitFeedback = async () => {
-    if (!id || !delivery || !pendingStatus) return;
-    setLoading(true);
-
-    const { data: currentDelivery, error: currentDeliveryError } = await supabase
-      .from('deliveries')
-      .select('id, expedition_id, customer_id, status')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (currentDeliveryError || !currentDelivery) {
-      setMessage('Erro ao buscar entrega antes do feedback.');
-      setLoading(false);
+    if (!id || !delivery) {
+      setModalError('Dados da entrega não encontrados. Recarregue a página.');
       return;
     }
+    const targetStatus = pendingStatus || 'finalizado';
+    setLoading(true);
+    setModalError('');
 
-    const { data: existingWarranty } = await supabase
-      .from('warranties')
-      .select('id')
-      .eq('delivery_id', id)
-      .maybeSingle();
+    try {
+      const { data: currentDelivery, error: currentDeliveryError } = await supabase
+        .from('deliveries')
+        .select('id, expedition_id, customer_id, status')
+        .eq('id', id)
+        .maybeSingle();
 
-    if (!existingWarranty) {
-      const startDate = new Date().toISOString().slice(0, 10);
-      const endDateObj = new Date();
-      endDateObj.setMonth(endDateObj.getMonth() + 3);
-      const endDate = endDateObj.toISOString().slice(0, 10);
+      if (currentDeliveryError || !currentDelivery) {
+        throw new Error(currentDeliveryError?.message || 'Entrega não encontrada no banco.');
+      }
 
-      const { error: warrantyError } = await supabase.from('warranties').insert({
+      // 1. Garantir garantia de 90 dias
+      const { data: existingWarranty } = await supabase
+        .from('warranties')
+        .select('id')
+        .eq('delivery_id', id)
+        .maybeSingle();
+
+      if (!existingWarranty) {
+        try {
+          const startDate = new Date().toISOString().slice(0, 10);
+          const endDateObj = new Date();
+          endDateObj.setMonth(endDateObj.getMonth() + 3);
+          const endDate = endDateObj.toISOString().slice(0, 10);
+
+          const { error: warrantyError } = await supabase.from('warranties').insert({
+            delivery_id: id,
+            expedition_id: currentDelivery.expedition_id,
+            customer_id: currentDelivery.customer_id,
+            start_date: startDate,
+            end_date: endDate,
+            status: 'active',
+          });
+
+          if (warrantyError && (warrantyError as any).code !== '23505') {
+            console.warn('Aviso ao criar garantia:', warrantyError);
+          }
+        } catch (wErr) {
+          console.warn('Erro na garantia (não bloqueante):', wErr);
+        }
+      }
+
+      // 2. Salvar o feedback
+      const rating = Number(
+        (
+          (feedbackDeliveryRating +
+            feedbackInstallationRating +
+            feedbackServiceRating +
+            feedbackEquipmentRating) /
+          4
+        ).toFixed(1)
+      );
+
+      const { error: feedbackError } = await supabase.from('feedbacks').insert({
         delivery_id: id,
         expedition_id: currentDelivery.expedition_id,
         customer_id: currentDelivery.customer_id,
-        start_date: startDate,
-        end_date: endDate,
-        status: 'active',
+        client_name: delivery.customer_name || null,
+        rating,
+        comment: feedbackComments || 'Nenhum comentário informado.',
+        delivery_rating: feedbackDeliveryRating,
+        installation_rating: feedbackInstallationRating,
+        service_rating: feedbackServiceRating,
+        equipment_rating: feedbackEquipmentRating,
       });
 
-      if (warrantyError) {
-        // ignore unique-violation (already exists)
-        if ((warrantyError as any).code !== '23505') {
-          console.error('Erro ao criar garantia:', warrantyError);
-        }
+      if (feedbackError) {
+        throw new Error(`Erro ao salvar feedback: ${feedbackError.message}`);
       }
-    }
 
-    const rating = Number(
-      (
-        (feedbackDeliveryRating +
-          feedbackInstallationRating +
-          feedbackServiceRating +
-          feedbackEquipmentRating) /
-        4
-      ).toFixed(1)
-    );
+      // 3. Atualizar status da entrega para finalizado
+      const updatePayload: Record<string, any> = { status: targetStatus };
+      if (targetStatus === 'finalizado') {
+        updatePayload.finished_at = new Date().toISOString();
+      }
 
-    const { error: feedbackError } = await supabase.from('feedbacks').insert({
-      delivery_id: id,
-      expedition_id: currentDelivery.expedition_id,
-      customer_id: currentDelivery.customer_id,
-      rating,
-      comment: feedbackComments || 'Nenhum comentário informado.',
-      delivery_rating: feedbackDeliveryRating,
-      installation_rating: feedbackInstallationRating,
-      service_rating: feedbackServiceRating,
-      equipment_rating: feedbackEquipmentRating,
-    });
+      const { error: updateError } = await supabase
+        .from('deliveries')
+        .update(updatePayload)
+        .eq('id', id);
 
-    if (feedbackError) {
-      setMessage('Erro ao salvar feedback.');
-      console.error('Erro ao criar feedback:', feedbackError);
-      setLoading(false);
-      return;
-    }
+      if (updateError) {
+        throw new Error(`Erro ao atualizar status da entrega: ${updateError.message}`);
+      }
 
-    const updatePayload: Record<string, any> = { status: pendingStatus };
-    if (pendingStatus === 'finalizado') {
-      updatePayload.finished_at = new Date().toISOString();
-    }
-
-    const { error: updateError } = await supabase
-      .from('deliveries')
-      .update(updatePayload)
-      .eq('id', id);
-
-    if (updateError) {
-      setMessage('Erro ao atualizar status da entrega.');
-      console.error('Erro ao atualizar entrega:', updateError);
-      setLoading(false);
-      return;
-    }
-
-    // Send WhatsApp with Fenix guide PDF and Google Review link when delivery is finalized
-    if (pendingStatus === 'finalizado') {
-      const phoneToUse = manualPhone.trim() || await getCustomerPhone(currentDelivery.customer_id);
-      if (phoneToUse) {
-        // Open WhatsApp directly on the company device to send to customer
-        openWhatsAppDirect(phoneToUse, delivery.customer_name, delivery.order_number);
-
+      // 4. Envio do WhatsApp (protegido para nunca bloquear)
+      if (targetStatus === 'finalizado') {
         try {
-          await logWhatsAppMessage(
-            id,
-            currentDelivery.customer_id,
-            phoneToUse,
-            'GARANTIA',
-            `Guia de Garantia Fenix e link Google enviados para ${delivery.customer_name}`,
-            'sent'
-          );
-        } catch (err) {
-          console.error('Erro ao registrar log do WhatsApp:', err);
+          const phoneToUse = manualPhone.trim() || (await getCustomerPhone(currentDelivery.customer_id));
+          if (phoneToUse) {
+            openWhatsAppDirect(phoneToUse, delivery.customer_name, delivery.order_number);
+            try {
+              await logWhatsAppMessage(
+                id,
+                currentDelivery.customer_id,
+                phoneToUse,
+                'GARANTIA',
+                `Guia de Garantia Fenix e link Google enviados para ${delivery.customer_name}`,
+                'sent'
+              );
+            } catch (err) {
+              console.error('Erro ao registrar log do WhatsApp:', err);
+            }
+          }
+        } catch (waErr) {
+          console.warn('Erro ao disparar WhatsApp (não bloqueia):', waErr);
         }
       }
-    }
 
-    setShowFeedbackModal(false);
-    setPendingStatus(null);
-    setMessage(`Entrega ${pendingStatus} e feedback salvo com sucesso.`);
-    navigate('/entregas');
+      setShowFeedbackModal(false);
+      setPendingStatus(null);
+      setMessage(`Entrega finalizada e feedback salvo com sucesso.`);
+      navigate('/entregas');
+    } catch (err: any) {
+      console.error('Erro ao salvar feedback:', err);
+      setModalError(err?.message || 'Ocorreu um erro ao salvar o feedback.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const skipFeedbackAndFinalize = async () => {
-    if (!id || !delivery || !pendingStatus) return;
+    if (!id || !delivery) {
+      setModalError('Dados da entrega não encontrados. Recarregue a página.');
+      return;
+    }
+    const targetStatus = pendingStatus || 'finalizado';
     setLoading(true);
+    setModalError('');
 
-    const { data: currentDelivery, error: currentDeliveryError } = await supabase
-      .from('deliveries')
-      .select('id, expedition_id, customer_id, status')
-      .eq('id', id)
-      .maybeSingle();
+    try {
+      const { data: currentDelivery, error: currentDeliveryError } = await supabase
+        .from('deliveries')
+        .select('id, expedition_id, customer_id, status')
+        .eq('id', id)
+        .maybeSingle();
 
-    if (currentDeliveryError || !currentDelivery) {
-      setMessage('Erro ao buscar entrega antes de finalizar.');
-      setLoading(false);
-      return;
-    }
-
-    const { data: existingWarranty } = await supabase
-      .from('warranties')
-      .select('id')
-      .eq('delivery_id', id)
-      .maybeSingle();
-
-    if (!existingWarranty) {
-      const startDate = new Date().toISOString().slice(0, 10);
-      const endDateObj = new Date();
-      endDateObj.setMonth(endDateObj.getMonth() + 3);
-      const endDate = endDateObj.toISOString().slice(0, 10);
-
-      const { error: warrantyError } = await supabase.from('warranties').insert({
-        delivery_id: id,
-        expedition_id: currentDelivery.expedition_id,
-        customer_id: currentDelivery.customer_id,
-        start_date: startDate,
-        end_date: endDate,
-        status: 'active',
-      });
-
-      if (warrantyError) {
-        if ((warrantyError as any).code !== '23505') {
-          console.error('Erro ao criar garantia:', warrantyError);
-        }
+      if (currentDeliveryError || !currentDelivery) {
+        throw new Error(currentDeliveryError?.message || 'Entrega não encontrada no banco.');
       }
-    }
 
-    const updatePayload: Record<string, any> = { status: pendingStatus };
-    if (pendingStatus === 'finalizado') {
-      updatePayload.finished_at = new Date().toISOString();
-    }
+      // 1. Garantir garantia de 90 dias
+      const { data: existingWarranty } = await supabase
+        .from('warranties')
+        .select('id')
+        .eq('delivery_id', id)
+        .maybeSingle();
 
-    const { error: updateError } = await supabase
-      .from('deliveries')
-      .update(updatePayload)
-      .eq('id', id);
-
-    if (updateError) {
-      setMessage('Erro ao atualizar status da entrega.');
-      console.error('Erro ao atualizar entrega:', updateError);
-      setLoading(false);
-      return;
-    }
-
-    // Send WhatsApp with Fenix guide PDF and Google Review link when delivery is finalized
-    if (pendingStatus === 'finalizado') {
-      const phoneToUse = manualPhone.trim() || await getCustomerPhone(currentDelivery.customer_id);
-      if (phoneToUse) {
-        openWhatsAppDirect(phoneToUse, delivery.customer_name, delivery.order_number);
+      if (!existingWarranty) {
         try {
-          await logWhatsAppMessage(
-            id,
-            currentDelivery.customer_id,
-            phoneToUse,
-            'GARANTIA',
-            `Guia de Garantia Fenix e link Google enviados para ${delivery.customer_name}`,
-            'sent'
-          );
-        } catch (err) {
-          console.error('Erro ao registrar log do WhatsApp:', err);
+          const startDate = new Date().toISOString().slice(0, 10);
+          const endDateObj = new Date();
+          endDateObj.setMonth(endDateObj.getMonth() + 3);
+          const endDate = endDateObj.toISOString().slice(0, 10);
+
+          const { error: warrantyError } = await supabase.from('warranties').insert({
+            delivery_id: id,
+            expedition_id: currentDelivery.expedition_id,
+            customer_id: currentDelivery.customer_id,
+            start_date: startDate,
+            end_date: endDate,
+            status: 'active',
+          });
+
+          if (warrantyError && (warrantyError as any).code !== '23505') {
+            console.warn('Aviso ao criar garantia:', warrantyError);
+          }
+        } catch (wErr) {
+          console.warn('Erro na garantia (não bloqueante):', wErr);
         }
       }
+
+      // 2. Atualizar status da entrega para finalizado
+      const updatePayload: Record<string, any> = { status: targetStatus };
+      if (targetStatus === 'finalizado') {
+        updatePayload.finished_at = new Date().toISOString();
+      }
+
+      const { error: updateError } = await supabase
+        .from('deliveries')
+        .update(updatePayload)
+        .eq('id', id);
+
+      if (updateError) {
+        throw new Error(`Erro ao atualizar status da entrega: ${updateError.message}`);
+      }
+
+      // 3. Envio do WhatsApp (protegido)
+      if (targetStatus === 'finalizado') {
+        try {
+          const phoneToUse = manualPhone.trim() || (await getCustomerPhone(currentDelivery.customer_id));
+          if (phoneToUse) {
+            openWhatsAppDirect(phoneToUse, delivery.customer_name, delivery.order_number);
+            try {
+              await logWhatsAppMessage(
+                id,
+                currentDelivery.customer_id,
+                phoneToUse,
+                'GARANTIA',
+                `Guia de Garantia Fenix e link Google enviados para ${delivery.customer_name}`,
+                'sent'
+              );
+            } catch (err) {
+              console.error('Erro ao registrar log do WhatsApp:', err);
+            }
+          }
+        } catch (waErr) {
+          console.warn('Erro ao disparar WhatsApp (não bloqueia):', waErr);
+        }
+      }
+
+      setShowFeedbackModal(false);
+      setPendingStatus(null);
+      setMessage(`Entrega finalizada (sem feedback).`);
+      navigate('/entregas');
+    } catch (err: any) {
+      console.error('Erro em skipFeedbackAndFinalize:', err);
+      setModalError(err?.message || 'Ocorreu um erro ao finalizar a entrega.');
+    } finally {
+      setLoading(false);
     }
-
-
-    setShowFeedbackModal(false);
-    setPendingStatus(null);
-    setMessage(`Entrega ${pendingStatus} finalizada (sem feedback).`);
-    setLoading(false);
-    navigate('/entregas');
   };
 
   const finalizeDelivery = async () => {
@@ -1099,7 +1125,7 @@ export const DeliveryDetail = ({ mode = 'view' }: DeliveryDetailProps) => {
                 const phoneToUse = manualPhone.trim();
                 if (!phoneToUse.replace(/\D/g, '')) {
                   setMessage('Informe o WhatsApp do cliente para enviar a mensagem.');
-                  setShowFeedbackModal(true);
+                  openFeedbackModal('finalizado');
                   return;
                 }
                 openWhatsAppDirect(phoneToUse, delivery.customer_name, delivery.order_number);
@@ -1229,6 +1255,12 @@ export const DeliveryDetail = ({ mode = 'view' }: DeliveryDetailProps) => {
                 </p>
               </div>
 
+
+              {modalError && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-700">
+                  ⚠️ {modalError}
+                </div>
+              )}
 
               <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
                 <button

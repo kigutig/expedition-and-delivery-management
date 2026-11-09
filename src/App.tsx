@@ -38,9 +38,15 @@ function App() {
 
   useEffect(() => {
     const fetchSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-      setLoadingSession(false);
+      try {
+        const { data } = await supabase.auth.getSession();
+        setSession(data?.session ?? null);
+      } catch (err) {
+        console.warn('[Supabase Auth] Falha ao obter sessão inicial:', err);
+        setSession(null);
+      } finally {
+        setLoadingSession(false);
+      }
     };
 
     fetchSession();

@@ -11,7 +11,17 @@ async function sha1(input: string): Promise<string> {
     .join("");
 }
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   try {
     if (req.method !== "POST") {
       return new Response(
@@ -21,6 +31,7 @@ Deno.serve(async (req) => {
         {
           status: 405,
           headers: {
+            ...corsHeaders,
             "Content-Type": "application/json",
           },
         }
@@ -38,6 +49,7 @@ Deno.serve(async (req) => {
         {
           status: 500,
           headers: {
+            ...corsHeaders,
             "Content-Type": "application/json",
           },
         }
@@ -58,11 +70,17 @@ Deno.serve(async (req) => {
 
     const folder = body.folder;
 
-    let paramsToSign = `timestamp=${timestamp}`;
-
+    // Cloudinary exige ordenação estritamente alfabética dos parâmetros
+    const params: Record<string, string | number> = {};
     if (folder) {
-      paramsToSign += `&folder=${folder}`;
+      params.folder = folder;
     }
+    params.timestamp = timestamp;
+
+    const paramsToSign = Object.keys(params)
+      .sort()
+      .map((key) => `${key}=${params[key]}`)
+      .join("&");
 
     const signature = await sha1(
       paramsToSign + apiSecret
@@ -78,6 +96,7 @@ Deno.serve(async (req) => {
       {
         status: 200,
         headers: {
+          ...corsHeaders,
           "Content-Type": "application/json",
         },
       }
@@ -92,6 +111,7 @@ Deno.serve(async (req) => {
       {
         status: 500,
         headers: {
+          ...corsHeaders,
           "Content-Type": "application/json",
         },
       }

@@ -92,10 +92,11 @@ async function uploadToCloudinary(
   uploadUrl: string,
   options: UploadOptions = {}
 ): Promise<CloudinaryUploadResult> {
-  const timestamp = Math.floor(Date.now() / 1000);
+  const clientTimestamp = Math.floor(Date.now() / 1000);
 
   // Assinatura obtida do servidor - API Secret nunca exposto no frontend
-  const { signature, api_key, cloud_name } = await getCloudinarySignature({ folder, timestamp });
+  const { signature, timestamp: serverTimestamp, api_key, cloud_name } = await getCloudinarySignature({ folder, timestamp: clientTimestamp });
+  const effectiveTimestamp = serverTimestamp ?? clientTimestamp;
 
   const effectiveCloudName = cloud_name || CLOUDINARY_CLOUD_NAME;
   const effectiveUrl = uploadUrl.replace(
@@ -106,8 +107,10 @@ async function uploadToCloudinary(
   const formData = new FormData();
   formData.append('file', file);
   formData.append('api_key', api_key || CLOUDINARY_API_KEY || '');
-  formData.append('timestamp', timestamp.toString());
-  formData.append('folder', folder);
+  formData.append('timestamp', effectiveTimestamp.toString());
+  if (folder) {
+    formData.append('folder', folder);
+  }
   formData.append('signature', signature);
 
   return new Promise<CloudinaryUploadResult>((resolve, reject) => {
@@ -127,7 +130,14 @@ async function uploadToCloudinary(
           reject(new Error('Resposta invalida do Cloudinary.'));
         }
       } else {
-        reject(new Error(`Cloudinary upload failed: ${xhr.status} ${xhr.statusText}`));
+        let errorDetail = '';
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          errorDetail = parsed.error?.message ? `: ${parsed.error.message}` : '';
+        } catch {
+          // ignore
+        }
+        reject(new Error(`Cloudinary upload failed: ${xhr.status} ${xhr.statusText}${errorDetail}`));
       }
     });
 
